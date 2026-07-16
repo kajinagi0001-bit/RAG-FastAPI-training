@@ -6,10 +6,12 @@ The current goals are:
 
 1. Create documents through an API
 2. Split document content into chunks
-3. Read documents and chunks from SQLite
-4. Store an embedding for each chunk
-5. Search chunks by vector similarity
-6. Generate an answer from retrieved context with an LLM
+3. Upload Markdown, text, and PDF files as documents
+4. Read documents and chunks from SQLite
+5. Store an embedding for each chunk
+6. Search chunks by vector similarity
+7. Generate an answer from retrieved context with an LLM
+8. Store conversation messages
 
 ## Setup
 
@@ -119,6 +121,18 @@ List chunks for a document:
 curl http://127.0.0.1:8000/documents/1/chunks
 ```
 
+Upload a Markdown, text, or PDF file:
+
+```powershell
+curl -X POST http://127.0.0.1:8000/documents/upload `
+  -F "file=@notes.md"
+```
+
+```powershell
+curl -X POST http://127.0.0.1:8000/documents/upload `
+  -F "file=@paper.pdf"
+```
+
 Ask a question:
 
 ```powershell
@@ -127,35 +141,72 @@ curl -X POST http://127.0.0.1:8000/chat `
   -d "{\"question\":\"How does RAG retrieve documents?\"}"
 ```
 
+Create a conversation:
+
+```powershell
+curl -X POST http://127.0.0.1:8000/conversations `
+  -H "Content-Type: application/json" `
+  -d "{\"title\":\"Agent memory\"}"
+```
+
+Ask in a conversation:
+
+```powershell
+curl -X POST http://127.0.0.1:8000/conversations/1/chat `
+  -H "Content-Type: application/json" `
+  -d "{\"question\":\"What does conversation memory store?\"}"
+```
+
+List conversation messages:
+
+```powershell
+curl http://127.0.0.1:8000/conversations/1/messages
+```
+
 ## API
 
 ```text
 POST /documents
+POST /documents/upload
 GET  /documents
 GET  /documents/{id}
 GET  /documents/{id}/chunks
 POST /chat
+POST /conversations
+GET  /conversations
+GET  /conversations/{id}/messages
+POST /conversations/{id}/chat
 ```
 
 ## Current Implementation
 
 This version splits each document into chunks when it is saved.
 
+Documents can be created from JSON or uploaded as `.md`, `.txt`, or `.pdf` files.
+
 Each chunk also gets an embedding stored in SQLite as JSON.
 
 `POST /chat` embeds the question, searches chunks by cosine similarity, and sends the retrieved context to an LLM to generate the final answer.
 
+`POST /conversations/{id}/chat` does the same RAG flow and also stores the user and assistant messages.
+
+It also passes the most recent conversation messages to the LLM prompt. The default history limit is:
+
+```text
+CONVERSATION_HISTORY_LIMIT=6
+```
+
 That keeps the DB/API flow visible:
 
 ```text
-request -> FastAPI -> question embedding -> vector retriever -> LLM -> response with sources
+request -> FastAPI -> optional conversation memory -> question embedding -> vector retriever -> LLM -> response with sources
 ```
 
 Next steps:
 
 1. Move vector search to pgvector, FAISS, or another vector store
-2. Add conversation history
-3. Add evaluation cases for answer quality
+2. Add evaluation cases for answer quality
+3. Add retrieval evaluation metrics
 
 ## Tests
 

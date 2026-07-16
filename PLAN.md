@@ -1,0 +1,373 @@
+# AI Agent Learning Plan
+
+This project is moving from a basic RAG API toward a structured AI agent learning project.
+
+The goal is not production hardening first. The goal is to learn the core building blocks of AI agents by implementing them one by one.
+
+## Current Baseline
+
+The project can already:
+
+1. Create documents through FastAPI
+2. Store documents in SQLite
+3. Split document content into chunks
+4. Create OpenAI embeddings for chunks
+5. Store chunk embeddings in SQLite as JSON
+6. Embed user questions
+7. Search chunks by cosine similarity
+8. Generate answers with an LLM using retrieved context
+9. Return both `answer` and `sources`
+
+Current RAG flow:
+
+```text
+document -> chunk -> embed -> store
+question -> embed -> retrieve chunks -> generate answer -> return sources
+```
+
+## Learning Roadmap
+
+The roadmap is organized around the major parts of an AI agent system:
+
+```text
+1. Knowledge Ingestion
+2. Memory
+3. Retrieval
+4. Generation
+5. Evaluation
+6. Agent Loop
+7. Tool Use
+```
+
+## Phase 1: Knowledge Ingestion
+
+Purpose:
+
+Build the pipeline that lets the agent receive external knowledge.
+
+Target API:
+
+```text
+POST /documents/upload
+```
+
+Start with:
+
+```text
+.md
+.txt
+```
+
+Then add:
+
+```text
+.pdf
+```
+
+Implementation tasks:
+
+1. Accept files with FastAPI `UploadFile`
+2. Detect file type
+3. Read Markdown and text files as UTF-8
+4. Extract text from PDFs
+5. Normalize extracted text
+6. Save as `Document`
+7. Split into chunks
+8. Generate embeddings
+9. Save chunks and embeddings
+
+Pipeline shape:
+
+```text
+file -> extract -> normalize -> chunk -> embed -> store
+```
+
+Concepts learned:
+
+```text
+Knowledge ingestion
+Document pipelines
+Unstructured data processing
+RAG preprocessing
+```
+
+Recommended first implementation:
+
+```text
+POST /documents/upload
+Supported: .md, .txt
+Title: filename
+Content: file text
+```
+
+Add PDF support after the text pipeline works.
+
+## Phase 2: Conversation Memory
+
+Purpose:
+
+Move from one-off RAG calls to a conversational agent with memory.
+
+Tables:
+
+```text
+conversations
+- id
+- title
+- created_at
+
+messages
+- id
+- conversation_id
+- role
+- content
+- created_at
+```
+
+Target APIs:
+
+```text
+POST /conversations
+GET  /conversations
+GET  /conversations/{id}/messages
+POST /conversations/{id}/chat
+```
+
+Flow:
+
+```text
+user question
+  -> save user message
+  -> retrieve relevant chunks
+  -> generate answer
+  -> save assistant message
+  -> return answer and sources
+```
+
+Concepts learned:
+
+```text
+Short-term memory
+Conversation state
+Chat API design
+Prompting with history
+```
+
+Implementation note:
+
+First, save conversation history only. After that works, include the most recent N messages in the LLM prompt.
+
+## Phase 3: Retrieval Evaluation
+
+Purpose:
+
+Measure whether retrieval is improving instead of relying on intuition.
+
+Start with a JSON or CSV eval file.
+
+Example eval case:
+
+```json
+{
+  "question": "What does RAG retrieve?",
+  "expected_document_id": 1,
+  "expected_text": "RAG retrieves relevant documents"
+}
+```
+
+Evaluation script:
+
+```text
+python scripts/eval_retrieval.py
+```
+
+Metrics:
+
+```text
+Recall@k
+Hit@k
+MRR
+```
+
+Example output:
+
+```text
+total: 10
+hit@1: 0.60
+hit@3: 0.80
+mrr: 0.72
+```
+
+Concepts learned:
+
+```text
+Retrieval evaluation
+Measuring search quality
+Comparing chunk sizes
+Comparing top_k values
+Comparing embedding models
+```
+
+## Phase 4: Answer Quality Evaluation
+
+Purpose:
+
+Track whether the final answer is grounded in retrieved sources.
+
+Add a run log table:
+
+```text
+rag_runs
+- id
+- question
+- answer
+- retrieved_sources_json
+- embedding_model
+- generation_model
+- created_at
+```
+
+Review APIs:
+
+```text
+GET /rag-runs
+GET /rag-runs/{id}
+```
+
+Evaluation dimensions:
+
+```text
+groundedness
+faithfulness
+answer_quality
+source_usefulness
+```
+
+Start with manual review. Later, add LLM-as-a-judge.
+
+Concepts learned:
+
+```text
+RAG evaluation
+Hallucination detection
+Observability
+Agent improvement loops
+```
+
+## Phase 5: Agent Loop
+
+Purpose:
+
+Move from a RAG API to an agent that can choose actions.
+
+Agent loop:
+
+```text
+user goal
+  -> plan
+  -> choose tool
+  -> use tool
+  -> observe result
+  -> answer or continue
+```
+
+Initial internal tools:
+
+```text
+search_knowledge_base(question)
+get_document_chunks(document_id)
+answer_with_context(question, sources)
+```
+
+First implement these as Python functions. Later, expose them through OpenAI tool calling.
+
+Concepts learned:
+
+```text
+Tool use
+Planning
+Observation
+Agent orchestration
+```
+
+## Phase 6: Tool Use
+
+Purpose:
+
+Let the LLM call structured tools instead of following one fixed pipeline.
+
+Possible tools:
+
+```text
+search_knowledge_base
+get_document
+get_document_chunks
+summarize_document
+create_eval_case
+```
+
+Learning goal:
+
+Understand how an agent decides what action to take and how tool outputs become context for the next step.
+
+## Recommended Implementation Order
+
+1. Markdown and text upload - done
+2. PDF upload - done
+3. Conversation and message tables
+4. `/conversations/{id}/chat`
+5. `rag_runs` logging
+6. Retrieval eval script
+7. Answer eval script
+8. Tool function separation
+9. Agent loop
+10. OpenAI tool calling
+
+Progress:
+
+```text
+Markdown/text upload: done
+PDF upload: done
+Conversation and message tables: done
+/conversations/{id}/chat: done
+Conversation history in prompt: done
+Retrieval evaluation: next
+```
+
+## Next Concrete Task
+
+Implement:
+
+```text
+POST /documents/upload
+```
+
+Supported file types:
+
+```text
+.md
+.txt
+```
+
+Behavior:
+
+```text
+UploadFile
+  -> validate extension
+  -> read as UTF-8
+  -> use filename as title
+  -> save Document
+  -> chunk
+  -> embed
+  -> store chunks
+```
+
+After that works, add PDF support.
+
+Status:
+
+```text
+.md upload: done
+.txt upload: done
+PDF upload: done
+```

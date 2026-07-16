@@ -21,9 +21,10 @@ class Settings:
     )
     openai_generation_model: str = os.getenv(
         "OPENAI_GENERATION_MODEL",
-        "gpt-5.6",
+        "gpt-4o mini",
     )
     local_embedding_dimensions: int = int(os.getenv("LOCAL_EMBEDDING_DIMENSIONS", "64"))
+    conversation_history_limit: int = int(os.getenv("CONVERSATION_HISTORY_LIMIT", "6"))
 
 
 settings = Settings()
