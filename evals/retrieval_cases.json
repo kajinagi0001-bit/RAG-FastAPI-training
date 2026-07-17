@@ -1,0 +1,13 @@
+[
+  {
+    "question": "What does conversation memory store?",
+    "expected_text": "Conversation memory stores user and assistant messages",
+    "top_k": 3
+  },
+  {
+    "question": "What does RAG retrieve before generation?",
+    "expected_text": "RAG retrieves relevant chunks before generation",
+    "top_k": 3
+  }
+]
+

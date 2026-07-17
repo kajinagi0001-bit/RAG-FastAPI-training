@@ -46,6 +46,20 @@ class ChatResponse(BaseModel):
     sources: list[Source]
 
 
+class AgentRequest(ChatRequest):
+    pass
+
+
+class AgentStep(BaseModel):
+    step: int
+    action: str
+    observation: str
+
+
+class AgentResponse(ChatResponse):
+    steps: list[AgentStep]
+
+
 class ConversationCreate(BaseModel):
     title: str = Field(default="New conversation", min_length=1, max_length=200)
 
@@ -65,4 +79,48 @@ class MessageRead(BaseModel):
     conversation_id: int
     role: str
     content: str
+    created_at: datetime
+
+
+class RagRunRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    conversation_id: int | None
+    question: str
+    answer: str
+    retrieved_sources_json: str
+    embedding_model: str
+    generation_model: str
+    created_at: datetime
+
+
+class RagRunFeedbackCreate(BaseModel):
+    groundedness: int = Field(ge=1, le=5)
+    answer_quality: int = Field(ge=1, le=5)
+    source_usefulness: int = Field(ge=1, le=5)
+    notes: str | None = None
+
+
+class RagRunFeedbackRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    rag_run_id: int
+    groundedness: int
+    answer_quality: int
+    source_usefulness: int
+    notes: str | None
+    created_at: datetime
+
+
+class AgentToolCallRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    rag_run_id: int
+    step: int
+    tool_name: str
+    arguments_json: str
+    output_json: str
     created_at: datetime

@@ -234,6 +234,27 @@ GET /rag-runs
 GET /rag-runs/{id}
 ```
 
+Manual feedback table:
+
+```text
+rag_run_feedback
+- id
+- rag_run_id
+- groundedness
+- answer_quality
+- source_usefulness
+- notes
+- created_at
+```
+
+Manual feedback APIs:
+
+```text
+POST /rag-runs/{id}/feedback
+GET /rag-runs/{id}/feedback
+POST /rag-runs/{id}/judge
+```
+
 Evaluation dimensions:
 
 ```text
@@ -243,7 +264,34 @@ answer_quality
 source_usefulness
 ```
 
-Start with manual review. Later, add LLM-as-a-judge.
+Start with manual review. Then add LLM-as-a-judge.
+
+LLM-as-a-judge flow:
+
+```text
+rag_run
+  -> question + answer + retrieved_sources_json
+  -> judge model
+  -> groundedness / answer_quality / source_usefulness / notes
+  -> save as rag_run_feedback
+```
+
+Answer summary script:
+
+```text
+python -m scripts.eval_answers
+```
+
+Summary metrics:
+
+```text
+total_feedback
+avg_groundedness
+avg_answer_quality
+avg_source_usefulness
+low_quality_count
+lowest_rated
+```
 
 Concepts learned:
 
@@ -271,15 +319,105 @@ user goal
   -> answer or continue
 ```
 
+Current first implementation:
+
+```text
+POST /agent
+
+question
+  -> plan
+  -> search_knowledge_base
+  -> decide_answer or decide_retry_search
+  -> optional retry search with larger top_k
+  -> answer_with_context
+  -> log_rag_run
+  -> return answer + sources + steps
+```
+
+Current conditional decision:
+
+```text
+if no results or best score < 0.25:
+  retry search once with a larger top_k
+else:
+  answer with current context
+```
+
+OpenAI tool-calling entrypoint:
+
+```text
+POST /agent/tool-calling
+
+available tools:
+- search_knowledge_base
+- get_document
+- get_document_chunks
+- answer_with_context
+```
+
+When OpenAI generation is enabled, the Responses API receives the tool definitions and chooses function calls.
+When local generation is enabled, this endpoint falls back to the local agent loop.
+
+Richer tool-calling behavior:
+
+```text
+search_knowledge_base
+  -> can identify promising document ids
+get_document
+  -> can inspect document title and full content
+get_document_chunks
+  -> can load all chunks for a document into latest_results
+answer_with_context
+  -> can answer using the latest retrieved or loaded context
+```
+
+Tool-call tracing:
+
+```text
+agent_tool_calls
+- id
+- rag_run_id
+- step
+- tool_name
+- arguments_json
+- output_json
+- created_at
+```
+
+Trace review API:
+
+```text
+GET /rag-runs/{id}/tool-calls
+```
+
+Tool-call evaluation script:
+
+```text
+python -m scripts.eval_tool_calls
+```
+
+Summary metrics:
+
+```text
+total_tool_calls
+runs_with_tool_calls
+avg_tool_calls_per_run
+tool_counts
+```
+
 Initial internal tools:
 
 ```text
+create_document_with_chunks(title, content)
 search_knowledge_base(question)
+get_document(document_id)
 get_document_chunks(document_id)
 answer_with_context(question, sources)
+run_rag_chat(question)
+create_feedback(rag_run_id, scores)
 ```
 
-First implement these as Python functions. Later, expose them through OpenAI tool calling.
+These are implemented as Python functions in `app/tools.py`. Later, expose selected tools through OpenAI tool calling.
 
 Concepts learned:
 
@@ -331,7 +469,18 @@ PDF upload: done
 Conversation and message tables: done
 /conversations/{id}/chat: done
 Conversation history in prompt: done
-Retrieval evaluation: next
+Retrieval evaluation: done
+Answer quality run logging: done
+Manual answer quality labels: done
+Answer evaluation summary script: done
+LLM-as-a-judge answer evaluation: done
+Tool function separation: done
+Agent loop: done
+Conditional agent decisions: done
+OpenAI tool calling: done
+Richer tool-calling decisions: done
+Tool-call tracing and evaluation: done
+Long-term memory tools: next
 ```
 
 ## Next Concrete Task
