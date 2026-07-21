@@ -4,9 +4,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.chunking import chunk_text
-from app.embedding import embed_text, serialize_embedding
+from app.embedding import cosine_similarity, deserialize_embedding, embed_text, serialize_embedding
 from app.llm import generate_answer
-from app.models import AgentToolCall, Chunk, Document, RagRun, RagRunFeedback
+from app.models import AgentToolCall, AgentToolCallFeedback, Chunk, Document, Memory, MemoryFeedback, RagRun, RagRunFeedback
 from app.retrieval import SearchResult
 from app.retrieval_service import chunk_embedding, embedding_model_name, retrieve_chunks
 from app.schemas import ChatResponse, Source
@@ -90,7 +90,13 @@ def run_rag_chat(
 ) -> ChatResponse:
     results = search_knowledge_base(db=db, question=question, top_k=top_k)
     response = answer_with_context(question=question, results=results, history=history)
-    log_rag_run(db=db, question=question, response=response, conversation_id=conversation_id)
+    log_rag_run(
+        db=db,
+        question=question,
+        response=response,
+        conversation_id=conversation_id,
+        run_type="conversation_rag" if conversation_id is not None else "chat",
+    )
     return response
 
 
@@ -99,6 +105,7 @@ def log_rag_run(
     question: str,
     response: ChatResponse,
     conversation_id: int | None,
+    run_type: str = "unknown",
 ) -> RagRun:
     run = RagRun(
         conversation_id=conversation_id,
@@ -108,6 +115,7 @@ def log_rag_run(
             [source.model_dump() for source in response.sources],
             ensure_ascii=False,
         ),
+        run_type=run_type,
         embedding_model=embedding_model_name(),
         generation_model=settings.openai_generation_model
         if settings.generation_provider == "openai"
@@ -137,6 +145,27 @@ def log_tool_call(
     return tool_call
 
 
+def create_tool_call_feedback(
+    db: Session,
+    tool_call_id: int,
+    tool_choice_quality: int,
+    argument_quality: int,
+    output_usefulness: int,
+    notes: str | None,
+) -> AgentToolCallFeedback:
+    feedback = AgentToolCallFeedback(
+        tool_call_id=tool_call_id,
+        tool_choice_quality=tool_choice_quality,
+        argument_quality=argument_quality,
+        output_usefulness=output_usefulness,
+        notes=notes,
+    )
+    db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    return feedback
+
+
 def create_feedback(
     db: Session,
     rag_run_id: int,
@@ -160,3 +189,54 @@ def create_feedback(
 
 def chunk_read_embedding(chunk: Chunk) -> list[float]:
     return chunk_embedding(chunk)
+
+
+def create_memory(db: Session, content: str, source: str | None = None) -> Memory:
+    embedding = embed_text(content)
+    memory = Memory(
+        content=content,
+        source=source,
+        embedding_json=serialize_embedding(embedding),
+        embedding_model=embedding_model_name(),
+    )
+    db.add(memory)
+    db.commit()
+    db.refresh(memory)
+    return memory
+
+
+def list_memories(db: Session) -> list[Memory]:
+    return list(db.scalars(select(Memory).order_by(Memory.created_at.desc(), Memory.id.desc())))
+
+
+def search_memories(db: Session, query: str, top_k: int) -> list[tuple[Memory, float]]:
+    query_embedding = embed_text(query)
+    scored: list[tuple[Memory, float]] = []
+    for memory in db.scalars(select(Memory)):
+        if memory.embedding_model != embedding_model_name():
+            continue
+        score = cosine_similarity(query_embedding, deserialize_embedding(memory.embedding_json))
+        if score > 0:
+            scored.append((memory, score))
+    return sorted(scored, key=lambda item: item[1], reverse=True)[:top_k]
+
+
+def create_memory_feedback(
+    db: Session,
+    memory_id: int,
+    importance: int,
+    accuracy: int,
+    future_usefulness: int,
+    notes: str | None,
+) -> MemoryFeedback:
+    feedback = MemoryFeedback(
+        memory_id=memory_id,
+        importance=importance,
+        accuracy=accuracy,
+        future_usefulness=future_usefulness,
+        notes=notes,
+    )
+    db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    return feedback

@@ -1,6 +1,13 @@
 import json
 
-from app.judge import judge_answer_local, parse_judge_json
+from app.judge import (
+    judge_answer_local,
+    judge_memory_local,
+    judge_tool_call_local,
+    parse_judge_json,
+    parse_memory_judge_json,
+    parse_tool_call_judge_json,
+)
 
 
 def test_parse_judge_json_returns_scores() -> None:
@@ -48,3 +55,62 @@ def test_judge_answer_local_penalizes_missing_sources() -> None:
 
     assert result.groundedness == 1
     assert result.source_usefulness == 1
+
+
+def test_parse_memory_judge_json_returns_scores() -> None:
+    result = parse_memory_judge_json(
+        json.dumps(
+            {
+                "importance": 5,
+                "accuracy": 4,
+                "future_usefulness": 5,
+                "notes": "Useful durable preference.",
+            }
+        )
+    )
+
+    assert result.importance == 5
+    assert result.accuracy == 4
+    assert result.future_usefulness == 5
+    assert result.notes == "Useful durable preference."
+
+
+def test_judge_memory_local_scores_durable_memory_higher() -> None:
+    result = judge_memory_local(
+        content="The user prefers implementation-first explanations.",
+        source="user",
+    )
+
+    assert result.importance >= 4
+    assert result.future_usefulness >= 4
+
+
+def test_parse_tool_call_judge_json_returns_scores() -> None:
+    result = parse_tool_call_judge_json(
+        json.dumps(
+            {
+                "tool_choice_quality": 5,
+                "argument_quality": 4,
+                "output_usefulness": 5,
+                "notes": "Appropriate search call.",
+            }
+        )
+    )
+
+    assert result.tool_choice_quality == 5
+    assert result.argument_quality == 4
+    assert result.output_usefulness == 5
+    assert result.notes == "Appropriate search call."
+
+
+def test_judge_tool_call_local_scores_error_output_lower() -> None:
+    result = judge_tool_call_local(
+        user_question="How does RAG retrieve documents?",
+        tool_name="search_knowledge_base",
+        arguments_json=json.dumps({"question": "How does RAG retrieve documents?", "top_k": 3}),
+        output_json=json.dumps({"error": "Search failed."}),
+    )
+
+    assert result.tool_choice_quality >= 4
+    assert result.argument_quality == 5
+    assert result.output_usefulness == 2

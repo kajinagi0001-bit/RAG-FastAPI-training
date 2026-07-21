@@ -1,21 +1,36 @@
 from fastapi.testclient import TestClient
+from datetime import datetime
 
 import app.main as main
 import app.retrieval_service as retrieval_service
 import app.tools as tools
 from app.embedding import embed_text_local
-from app.judge import JudgeResult
+from app.judge import JudgeResult, MemoryJudgeResult, ToolCallJudgeResult
 from app.main import app
+from app.models import AgentToolCall, Memory, RagRun
 from app.schemas import AgentResponse, AgentStep
 
 
 client = TestClient(app)
 
 
+def test_chat_ui_returns_html() -> None:
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "RAG Chat" in response.text
+    assert "Document Upload" in response.text
+    assert "/documents/upload" in response.text
+    assert "Evaluation Dashboard" in response.text
+    assert "/agent/tool-calling" in response.text
+
+
 def test_create_list_and_chat(monkeypatch) -> None:
     monkeypatch.setattr(tools, "embed_text", embed_text_local)
     monkeypatch.setattr(retrieval_service, "embed_text", embed_text_local)
     monkeypatch.setattr(retrieval_service, "embedding_model_name", lambda: "local-hash-64")
+    monkeypatch.setattr(tools, "search_memories", lambda db, query, top_k: [])
     monkeypatch.setattr(
         tools,
         "generate_answer",
@@ -56,6 +71,7 @@ def test_create_list_and_chat(monkeypatch) -> None:
         run for run in runs.json() if run["question"] == "How does RAG retrieve documents?"
     ]
     assert matching_runs
+    assert matching_runs[0]["run_type"] == "chat"
 
     feedback = client.post(
         f"/rag-runs/{matching_runs[0]['id']}/feedback",
@@ -99,11 +115,18 @@ def test_create_list_and_chat(monkeypatch) -> None:
     assert agent_response.json()["answer"] == "Generated answer from retrieved context."
     assert [step["action"] for step in agent_response.json()["steps"]] == [
         "plan",
+        "search_memories",
         "search_knowledge_base",
         "decide_answer",
         "answer_with_context",
         "log_rag_run",
     ]
+    agent_runs = [
+        run
+        for run in client.get("/rag-runs").json()
+        if run["question"] == "How does RAG retrieve documents?"
+    ]
+    assert agent_runs[0]["run_type"] == "agent"
 
     monkeypatch.setattr(
         main,
@@ -127,6 +150,97 @@ def test_create_list_and_chat(monkeypatch) -> None:
     assert tool_calling_agent.status_code == 200
     assert tool_calling_agent.json()["answer"] == "Tool-calling agent answer."
     assert tool_calling_agent.json()["steps"]
+
+
+def test_dashboard_returns_evaluation_html() -> None:
+    response = client.get("/dashboard")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Evaluation Dashboard" in response.text
+    assert "Run Type Summary" in response.text
+    assert "Recent Runs" in response.text
+    assert "Low Rated Answers" in response.text
+    assert "Recent Tool Calls" in response.text
+    assert "Memory Cleanup Candidates" in response.text
+
+
+def test_memory_endpoints(monkeypatch) -> None:
+    memory = Memory(
+        id=1,
+        content="The user prefers implementation-first explanations.",
+        source="user",
+        embedding_json="[]",
+        embedding_model="local-hash-64",
+        created_at=datetime(2026, 7, 17, 0, 0, 0),
+    )
+    monkeypatch.setattr(main, "create_memory", lambda db, content, source=None: memory)
+    monkeypatch.setattr(
+        main,
+        "create_memory_feedback",
+        lambda db, memory_id, importance, accuracy, future_usefulness, notes: main.MemoryFeedback(
+            id=1,
+            memory_id=memory_id,
+            importance=importance,
+            accuracy=accuracy,
+            future_usefulness=future_usefulness,
+            notes=notes,
+            created_at=datetime(2026, 7, 17, 0, 0, 0),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(main, "tool_list_memories", lambda db: [memory])
+    monkeypatch.setattr(main, "search_memories", lambda db, query, top_k: [(memory, 0.75)])
+
+    created = client.post(
+        "/memories",
+        json={
+            "content": "The user prefers implementation-first explanations.",
+            "source": "user",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["content"] == "The user prefers implementation-first explanations."
+
+    listed = client.get("/memories")
+    assert listed.status_code == 200
+    assert listed.json()[0]["source"] == "user"
+
+    searched = client.post(
+        "/memories/search",
+        json={"query": "explanation preference", "top_k": 3},
+    )
+    assert searched.status_code == 200
+    assert searched.json()[0]["score"] == 0.75
+
+    monkeypatch.setattr(
+        main,
+        "judge_memory",
+        lambda content, source: MemoryJudgeResult(
+            importance=5,
+            accuracy=4,
+            future_usefulness=5,
+            notes="Useful durable memory.",
+        ),
+    )
+
+    class FakeDb:
+        def get(self, model, item_id):
+            if model is Memory and item_id == 1:
+                return memory
+            return None
+
+    def override_get_db():
+        yield FakeDb()
+
+    app.dependency_overrides[main.get_db] = override_get_db
+    try:
+        judged = client.post("/memories/1/judge")
+    finally:
+        app.dependency_overrides.clear()
+    assert judged.status_code == 201
+    assert judged.json()["importance"] == 5
+    assert judged.json()["notes"].startswith("Memory judge:")
 
 
 def test_upload_markdown_document(monkeypatch) -> None:
@@ -269,6 +383,134 @@ def test_rag_run_feedback_rejects_scores_outside_range() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_tool_call_feedback_returns_404_for_missing_tool_call() -> None:
+    response = client.post(
+        "/tool-calls/999999/feedback",
+        json={
+            "tool_choice_quality": 3,
+            "argument_quality": 3,
+            "output_usefulness": 3,
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_tool_call_feedback_rejects_scores_outside_range() -> None:
+    response = client.post(
+        "/tool-calls/1/feedback",
+        json={
+            "tool_choice_quality": 6,
+            "argument_quality": 3,
+            "output_usefulness": 3,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_tool_call_judge_saves_feedback(monkeypatch) -> None:
+    tool_call = AgentToolCall(
+        id=1,
+        rag_run_id=10,
+        step=1,
+        tool_name="search_knowledge_base",
+        arguments_json='{"question":"RAG","top_k":3}',
+        output_json='{"retrieved_count":1}',
+    )
+    rag_run = RagRun(
+        id=10,
+        question="How does RAG retrieve documents?",
+        answer="",
+        retrieved_sources_json="[]",
+        embedding_model="local-hash-64",
+        generation_model="local",
+    )
+
+    class FakeDb:
+        def get(self, model, item_id):
+            if model is AgentToolCall and item_id == 1:
+                return tool_call
+            if model is RagRun and item_id == 10:
+                return rag_run
+            return None
+
+    def override_get_db():
+        yield FakeDb()
+
+    monkeypatch.setattr(
+        main,
+        "judge_tool_call",
+        lambda user_question, tool_name, arguments_json, output_json: ToolCallJudgeResult(
+            tool_choice_quality=5,
+            argument_quality=4,
+            output_usefulness=5,
+            notes="Appropriate tool call.",
+        ),
+    )
+    monkeypatch.setattr(
+        main,
+        "create_tool_call_feedback",
+        lambda db, tool_call_id, tool_choice_quality, argument_quality, output_usefulness, notes: main.AgentToolCallFeedback(
+            id=1,
+            tool_call_id=tool_call_id,
+            tool_choice_quality=tool_choice_quality,
+            argument_quality=argument_quality,
+            output_usefulness=output_usefulness,
+            notes=notes,
+            created_at=datetime(2026, 7, 17, 0, 0, 0),
+        ),
+    )
+
+    app.dependency_overrides[main.get_db] = override_get_db
+    try:
+        response = client.post("/tool-calls/1/judge")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["tool_choice_quality"] == 5
+    assert response.json()["notes"].startswith("Tool call judge:")
+
+
+def test_tool_call_judge_returns_404_for_missing_tool_call() -> None:
+    response = client.post("/tool-calls/999999/judge")
+
+    assert response.status_code == 404
+
+
+def test_memory_feedback_returns_404_for_missing_memory() -> None:
+    response = client.post(
+        "/memories/999999/feedback",
+        json={
+            "importance": 3,
+            "accuracy": 3,
+            "future_usefulness": 3,
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_memory_feedback_rejects_scores_outside_range() -> None:
+    response = client.post(
+        "/memories/1/feedback",
+        json={
+            "importance": 6,
+            "accuracy": 3,
+            "future_usefulness": 3,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_memory_judge_returns_404_for_missing_memory() -> None:
+    response = client.post("/memories/999999/judge")
+
+    assert response.status_code == 404
 
 
 def test_list_document_chunks_returns_404_for_missing_document() -> None:

@@ -2,3 +2,8 @@
 pythonpath = ["."]
 testpaths = ["tests"]
 
+[dependency-groups]
+dev = [
+    "code2flow>=2.5.1",
+]
+

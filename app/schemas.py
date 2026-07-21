@@ -90,6 +90,7 @@ class RagRunRead(BaseModel):
     question: str
     answer: str
     retrieved_sources_json: str
+    run_type: str
     embedding_model: str
     generation_model: str
     created_at: datetime
@@ -123,4 +124,70 @@ class AgentToolCallRead(BaseModel):
     tool_name: str
     arguments_json: str
     output_json: str
+    created_at: datetime
+
+
+class AgentToolCallFeedbackCreate(BaseModel):
+    tool_choice_quality: int = Field(ge=1, le=5)
+    argument_quality: int = Field(ge=1, le=5)
+    output_usefulness: int = Field(ge=1, le=5)
+    notes: str | None = None
+
+
+class AgentToolCallFeedbackRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tool_call_id: int
+    tool_choice_quality: int
+    argument_quality: int
+    output_usefulness: int
+    notes: str | None
+    created_at: datetime
+
+
+class MemoryCreate(BaseModel):
+    content: str = Field(min_length=1)
+    source: str | None = Field(default=None, max_length=100)
+
+
+class MemoryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    content: str
+    source: str | None
+    embedding_model: str
+    created_at: datetime
+
+
+class MemorySearchRequest(BaseModel):
+    query: str = Field(min_length=1)
+    top_k: int = Field(default=5, ge=1, le=10)
+
+
+class MemorySearchResult(BaseModel):
+    id: int
+    content: str
+    source: str | None
+    score: float
+    created_at: datetime
+
+
+class MemoryFeedbackCreate(BaseModel):
+    importance: int = Field(ge=1, le=5)
+    accuracy: int = Field(ge=1, le=5)
+    future_usefulness: int = Field(ge=1, le=5)
+    notes: str | None = None
+
+
+class MemoryFeedbackRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    memory_id: int
+    importance: int
+    accuracy: int
+    future_usefulness: int
+    notes: str | None
     created_at: datetime

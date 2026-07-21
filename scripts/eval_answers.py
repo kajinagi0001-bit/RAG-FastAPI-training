@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import Base, SessionLocal, engine
+from app.db_schema import ensure_schema
 from app.models import RagRun, RagRunFeedback
 
 
@@ -93,6 +94,7 @@ def main() -> None:
     args = parser.parse_args()
 
     Base.metadata.create_all(bind=engine)
+    ensure_schema()
     with SessionLocal() as db:
         feedback = load_feedback(db)
 

@@ -1,8 +1,9 @@
 import json
+from datetime import datetime
 
 import app.tool_calling_agent as tool_calling_agent
 from app.embedding import embed_text_local
-from app.models import Chunk, Document
+from app.models import Chunk, Document, Memory
 from app.retrieval import SearchableChunk, SearchResult
 from app.schemas import ChatResponse, Source
 from app.tool_calling_agent import ToolCallingState, execute_tool_call
@@ -143,3 +144,67 @@ def test_execute_get_document_chunks_tool_call_updates_latest_results(monkeypatc
     assert data["chunks"][0]["chunk_id"] == 3
     assert state.latest_results[0].chunk.title == "Agent plan"
     assert state.latest_results[0].score == 1.0
+
+
+def test_execute_create_memory_tool_call_returns_memory(monkeypatch) -> None:
+    memory = Memory(
+        id=5,
+        content="The user prefers concise explanations.",
+        source="user",
+        embedding_json="[]",
+        embedding_model="local-hash-64",
+        created_at=datetime(2026, 7, 17, 0, 0, 0),
+    )
+    monkeypatch.setattr(
+        tool_calling_agent.tools,
+        "create_memory",
+        lambda db, content, source=None: memory,
+    )
+
+    output = execute_tool_call(
+        db=object(),
+        state=ToolCallingState(),
+        name="create_memory",
+        raw_arguments=json.dumps(
+            {
+                "content": "The user prefers concise explanations.",
+                "source": "user",
+            }
+        ),
+        default_question="fallback",
+        default_top_k=1,
+    )
+
+    data = json.loads(output)
+    assert data["id"] == 5
+    assert data["source"] == "user"
+
+
+def test_execute_search_memories_tool_call_returns_matches(monkeypatch) -> None:
+    memory = Memory(
+        id=5,
+        content="The user prefers concise explanations.",
+        source="user",
+        embedding_json="[]",
+        embedding_model="local-hash-64",
+        created_at=datetime(2026, 7, 17, 0, 0, 0),
+    )
+    monkeypatch.setattr(
+        tool_calling_agent.tools,
+        "search_memories",
+        lambda db, query, top_k: [(memory, 0.8)],
+    )
+
+    output = execute_tool_call(
+        db=object(),
+        state=ToolCallingState(),
+        name="search_memories",
+        raw_arguments=json.dumps({"query": "explanation preference", "top_k": 3}),
+        default_question="fallback",
+        default_top_k=1,
+    )
+
+    data = json.loads(output)
+    assert data["memory_count"] == 1
+    assert data["memories"][0]["content"] == "The user prefers concise explanations."
+    assert data["memories"][0]["score"] == 0.8

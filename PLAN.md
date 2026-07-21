@@ -222,6 +222,7 @@ rag_runs
 - question
 - answer
 - retrieved_sources_json
+- run_type
 - embedding_model
 - generation_model
 - created_at
@@ -326,6 +327,7 @@ POST /agent
 
 question
   -> plan
+  -> search_memories
   -> search_knowledge_base
   -> decide_answer or decide_retry_search
   -> optional retry search with larger top_k
@@ -343,6 +345,16 @@ else:
   answer with current context
 ```
 
+Memory-aware agent behavior:
+
+```text
+/agent
+  -> search long-term memories
+  -> append matching memories to answer history
+  -> search knowledge base
+  -> answer with retrieved document context plus memory context
+```
+
 OpenAI tool-calling entrypoint:
 
 ```text
@@ -352,6 +364,8 @@ available tools:
 - search_knowledge_base
 - get_document
 - get_document_chunks
+- create_memory
+- search_memories
 - answer_with_context
 ```
 
@@ -384,10 +398,26 @@ agent_tool_calls
 - created_at
 ```
 
+Tool-call feedback:
+
+```text
+agent_tool_call_feedback
+- id
+- tool_call_id
+- tool_choice_quality
+- argument_quality
+- output_usefulness
+- notes
+- created_at
+```
+
 Trace review API:
 
 ```text
 GET /rag-runs/{id}/tool-calls
+POST /tool-calls/{id}/feedback
+GET /tool-calls/{id}/feedback
+POST /tool-calls/{id}/judge
 ```
 
 Tool-call evaluation script:
@@ -403,6 +433,125 @@ total_tool_calls
 runs_with_tool_calls
 avg_tool_calls_per_run
 tool_counts
+feedback_count
+avg_tool_choice_quality
+avg_argument_quality
+avg_output_usefulness
+low_quality_feedback_count
+```
+
+Automatic tool-call judging:
+
+```text
+agent_tool_call
+  -> rag_run.question + tool_name + arguments_json + output_json
+  -> judge model
+  -> tool_choice_quality / argument_quality / output_usefulness / notes
+  -> save as agent_tool_call_feedback
+```
+
+Long-term memory:
+
+```text
+memories
+- id
+- content
+- source
+- embedding_json
+- embedding_model
+- created_at
+```
+
+Memory APIs:
+
+```text
+POST /memories
+GET /memories
+POST /memories/search
+POST /memories/{id}/feedback
+GET /memories/{id}/feedback
+POST /memories/{id}/judge
+```
+
+Memory tools:
+
+```text
+create_memory(content, source)
+search_memories(query, top_k)
+```
+
+Memory quality feedback:
+
+```text
+memory_feedback
+- id
+- memory_id
+- importance
+- accuracy
+- future_usefulness
+- notes
+- created_at
+```
+
+Memory evaluation script:
+
+```text
+python -m scripts.eval_memories
+```
+
+Summary metrics:
+
+```text
+feedback_count
+avg_importance
+avg_accuracy
+avg_future_usefulness
+low_quality_count
+lowest_rated_memories
+cleanup_suggestions
+```
+
+Memory cleanup suggestion actions:
+
+```text
+keep
+review
+delete_candidate
+```
+
+Agent run comparison reports:
+
+```text
+python -m scripts.eval_agent_runs
+```
+
+Compared run types:
+
+```text
+tool_calling_agent
+conversation_rag
+chat_or_local_agent
+```
+
+Summary metrics:
+
+```text
+run_count
+feedback_count
+avg_groundedness
+avg_answer_quality
+avg_source_usefulness
+avg_tool_calls
+lowest_rated_runs
+```
+
+Automatic memory judging:
+
+```text
+memory
+  -> judge model
+  -> importance / accuracy / future_usefulness / notes
+  -> save as memory_feedback
 ```
 
 Initial internal tools:
@@ -480,7 +629,17 @@ Conditional agent decisions: done
 OpenAI tool calling: done
 Richer tool-calling decisions: done
 Tool-call tracing and evaluation: done
-Long-term memory tools: next
+Long-term memory tools: done
+Memory-aware agent behavior: done
+Tool-call quality labels: done
+Memory quality evaluation: done
+Automatic memory judging: done
+Automatic tool-call judging: done
+Memory cleanup suggestions: done
+Agent run comparison reports: done
+Agent run type tracking: done
+Evaluation dashboard: done
+Chat UI: done
 ```
 
 ## Next Concrete Task
@@ -488,35 +647,23 @@ Long-term memory tools: next
 Implement:
 
 ```text
-POST /documents/upload
+Dashboard API
 ```
 
-Supported file types:
+Purpose:
 
 ```text
-.md
-.txt
+Expose dashboard and chat-supporting data as JSON so the UI can become richer without duplicating backend logic.
 ```
 
-Behavior:
+Candidate endpoint:
 
 ```text
-UploadFile
-  -> validate extension
-  -> read as UTF-8
-  -> use filename as title
-  -> save Document
-  -> chunk
-  -> embed
-  -> store chunks
+GET /dashboard/data
 ```
 
-After that works, add PDF support.
-
-Status:
+Learning goal:
 
 ```text
-.md upload: done
-.txt upload: done
-PDF upload: done
+Separate data APIs from HTML rendering.
 ```

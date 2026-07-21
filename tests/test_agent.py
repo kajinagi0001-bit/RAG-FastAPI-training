@@ -17,6 +17,11 @@ def test_run_agent_records_steps_and_returns_answer(monkeypatch) -> None:
 
     monkeypatch.setattr(
         agent.tools,
+        "search_memories",
+        lambda db, query, top_k: [],
+    )
+    monkeypatch.setattr(
+        agent.tools,
         "search_knowledge_base",
         lambda db, question, top_k: [SearchResult(chunk=chunk, score=0.9)],
     )
@@ -42,7 +47,9 @@ def test_run_agent_records_steps_and_returns_answer(monkeypatch) -> None:
     monkeypatch.setattr(
         agent.tools,
         "log_rag_run",
-        lambda db, question, response, conversation_id: logged.append(question),
+        lambda db, question, response, conversation_id, run_type="unknown": logged.append(
+            (question, run_type)
+        ),
     )
 
     response = run_agent(db=object(), question="What does RAG retrieve?", top_k=3)
@@ -51,12 +58,13 @@ def test_run_agent_records_steps_and_returns_answer(monkeypatch) -> None:
     assert response.sources[0].document_id == 7
     assert [step.action for step in response.steps] == [
         "plan",
+        "search_memories",
         "search_knowledge_base",
         "decide_answer",
         "answer_with_context",
         "log_rag_run",
     ]
-    assert logged == ["What does RAG retrieve?"]
+    assert logged == [("What does RAG retrieve?", "agent")]
 
 
 def test_run_agent_retries_search_when_retrieval_is_weak(monkeypatch) -> None:
@@ -85,6 +93,7 @@ def test_run_agent_retries_search_when_retrieval_is_weak(monkeypatch) -> None:
         return [SearchResult(chunk=strong_chunk, score=0.8)]
 
     monkeypatch.setattr(agent.tools, "search_knowledge_base", fake_search)
+    monkeypatch.setattr(agent.tools, "search_memories", lambda db, query, top_k: [])
     monkeypatch.setattr(
         agent.tools,
         "answer_with_context",
@@ -105,7 +114,7 @@ def test_run_agent_retries_search_when_retrieval_is_weak(monkeypatch) -> None:
     monkeypatch.setattr(
         agent.tools,
         "log_rag_run",
-        lambda db, question, response, conversation_id: None,
+        lambda db, question, response, conversation_id, run_type="unknown": None,
     )
 
     response = run_agent(db=object(), question="How can an agent recover?", top_k=3)
@@ -114,9 +123,55 @@ def test_run_agent_retries_search_when_retrieval_is_weak(monkeypatch) -> None:
     assert response.answer == "Retried answer from stronger context."
     assert [step.action for step in response.steps] == [
         "plan",
+        "search_memories",
         "search_knowledge_base",
         "decide_retry_search",
         "search_knowledge_base",
         "answer_with_context",
         "log_rag_run",
     ]
+
+
+def test_run_agent_passes_memories_to_answer_history(monkeypatch) -> None:
+    from app.models import Memory
+
+    chunk = SearchableChunk(
+        chunk_id=1,
+        document_id=7,
+        title="RAG",
+        content="RAG retrieves relevant chunks.",
+        chunk_index=2,
+        embedding=embed_text_local("RAG retrieves relevant chunks."),
+    )
+    memory = Memory(
+        id=1,
+        content="The user prefers implementation-first explanations.",
+        source="user",
+        embedding_json="[]",
+        embedding_model="local-hash-64",
+    )
+    captured_history = []
+
+    monkeypatch.setattr(agent.tools, "search_memories", lambda db, query, top_k: [(memory, 0.8)])
+    monkeypatch.setattr(
+        agent.tools,
+        "search_knowledge_base",
+        lambda db, question, top_k: [SearchResult(chunk=chunk, score=0.9)],
+    )
+
+    def fake_answer(question, results, history=None):
+        captured_history.append(history)
+        return ChatResponse(answer="Memory-aware answer.", sources=[])
+
+    monkeypatch.setattr(agent.tools, "answer_with_context", fake_answer)
+    monkeypatch.setattr(
+        agent.tools,
+        "log_rag_run",
+        lambda db, question, response, conversation_id, run_type="unknown": None,
+    )
+
+    response = run_agent(db=object(), question="How should you explain this?", top_k=3)
+
+    assert response.answer == "Memory-aware answer."
+    assert captured_history[-1][-1][0] == "memory"
+    assert "implementation-first" in captured_history[-1][-1][1]

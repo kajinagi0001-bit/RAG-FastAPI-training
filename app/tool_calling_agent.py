@@ -14,9 +14,11 @@ from app.settings import settings
 
 TOOL_CALLING_INSTRUCTIONS = """
 You are an agent that answers questions using the provided tools.
+Use search_memories when user preferences or prior durable notes may affect the answer.
 Use search_knowledge_base before answering factual questions about the local knowledge base.
 Use get_document when you need document-level metadata or full document content.
 Use get_document_chunks when you need to inspect all chunks for a specific document.
+Use create_memory only when the user explicitly asks you to remember something.
 Use answer_with_context after searching when you need to produce the final grounded answer.
 """.strip()
 
@@ -91,6 +93,48 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 }
             },
             "required": ["question"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "create_memory",
+        "description": "Store a durable memory for future conversations. Use only when explicitly asked to remember something.",
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The memory content to store.",
+                },
+                "source": {
+                    "type": ["string", "null"],
+                    "description": "Optional source label, such as user or agent.",
+                },
+            },
+            "required": ["content", "source"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "search_memories",
+        "description": "Search durable memories for user preferences or long-term notes.",
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The memory search query.",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Maximum number of memories to retrieve.",
+                },
+            },
+            "required": ["query", "top_k"],
             "additionalProperties": False,
         },
     },
@@ -210,6 +254,7 @@ def run_tool_calling_agent(
         question=question,
         response=final_response,
         conversation_id=conversation_id,
+        run_type="tool_calling_agent",
     )
     for trace in tool_call_traces:
         tools.log_tool_call(
@@ -298,6 +343,47 @@ def execute_tool_call(
                 "document_id": document_id,
                 "chunk_count": len(chunks),
                 "chunks": [_chunk_to_dict(chunk) for chunk in chunks],
+            },
+            ensure_ascii=False,
+        )
+
+    if name == "create_memory":
+        memory = tools.create_memory(
+            db=db,
+            content=str(arguments["content"]),
+            source=arguments.get("source"),
+        )
+        return json.dumps(
+            {
+                "id": memory.id,
+                "content": memory.content,
+                "source": memory.source,
+                "created_at": memory.created_at.isoformat()
+                if memory.created_at is not None
+                else None,
+            },
+            ensure_ascii=False,
+        )
+
+    if name == "search_memories":
+        query = str(arguments.get("query") or default_question)
+        top_k = int(arguments.get("top_k") or default_top_k)
+        memories = tools.search_memories(db=db, query=query, top_k=top_k)
+        return json.dumps(
+            {
+                "memory_count": len(memories),
+                "memories": [
+                    {
+                        "id": memory.id,
+                        "content": memory.content,
+                        "source": memory.source,
+                        "score": score,
+                        "created_at": memory.created_at.isoformat()
+                        if memory.created_at is not None
+                        else None,
+                    }
+                    for memory, score in memories
+                ],
             },
             ensure_ascii=False,
         )

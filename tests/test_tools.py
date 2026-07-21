@@ -1,7 +1,13 @@
 import app.tools as tools
 from app.embedding import embed_text_local
 from app.retrieval import SearchableChunk, SearchResult
-from app.tools import answer_with_context, log_tool_call
+from app.tools import (
+    answer_with_context,
+    create_memory_feedback,
+    create_tool_call_feedback,
+    log_rag_run,
+    log_tool_call,
+)
 
 
 class FakeDb:
@@ -10,6 +16,15 @@ class FakeDb:
 
     def add(self, item) -> None:
         self.added.append(item)
+
+    def commit(self) -> None:
+        pass
+
+    def flush(self) -> None:
+        pass
+
+    def refresh(self, item) -> None:
+        pass
 
 
 def test_answer_with_context_returns_no_evidence_message_for_empty_results() -> None:
@@ -60,3 +75,54 @@ def test_log_tool_call_adds_trace_to_db() -> None:
     assert db.added == [tool_call]
     assert tool_call.rag_run_id == 10
     assert tool_call.tool_name == "search_knowledge_base"
+
+
+def test_log_rag_run_saves_run_type() -> None:
+    db = FakeDb()
+    response = answer_with_context(question="What is RAG?", results=[])
+
+    run = log_rag_run(
+        db=db,
+        question="What is RAG?",
+        response=response,
+        conversation_id=None,
+        run_type="chat",
+    )
+
+    assert db.added == [run]
+    assert run.run_type == "chat"
+    assert run.question == "What is RAG?"
+
+
+def test_create_tool_call_feedback_adds_feedback_to_db() -> None:
+    db = FakeDb()
+
+    feedback = create_tool_call_feedback(
+        db=db,
+        tool_call_id=5,
+        tool_choice_quality=4,
+        argument_quality=5,
+        output_usefulness=4,
+        notes="Useful search call.",
+    )
+
+    assert db.added == [feedback]
+    assert feedback.tool_call_id == 5
+    assert feedback.argument_quality == 5
+
+
+def test_create_memory_feedback_adds_feedback_to_db() -> None:
+    db = FakeDb()
+
+    feedback = create_memory_feedback(
+        db=db,
+        memory_id=3,
+        importance=5,
+        accuracy=4,
+        future_usefulness=5,
+        notes="Worth keeping.",
+    )
+
+    assert db.added == [feedback]
+    assert feedback.memory_id == 3
+    assert feedback.future_usefulness == 5
