@@ -1,4 +1,3 @@
-from app.embedding import embed_text_local
 from app.retrieval import SearchableChunk, search_documents, tokenize
 
 
@@ -14,7 +13,7 @@ def test_search_documents_returns_best_match() -> None:
             title="SQL",
             content="SQL stores relational data.",
             chunk_index=0,
-            embedding=embed_text_local("SQL SQL stores relational data."),
+            embedding=[1.0, 0.0],
         ),
         SearchableChunk(
             chunk_id=2,
@@ -22,12 +21,12 @@ def test_search_documents_returns_best_match() -> None:
             title="RAG",
             content="RAG retrieves relevant documents.",
             chunk_index=0,
-            embedding=embed_text_local("RAG RAG retrieves relevant documents."),
+            embedding=[0.0, 1.0],
         ),
     ]
 
     results = search_documents(
-        embed_text_local("How does RAG retrieve documents?"),
+        [0.0, 1.0],
         chunks,
         top_k=1,
     )

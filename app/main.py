@@ -58,64 +58,72 @@ ensure_schema()
 app = FastAPI(title="RAG FastAPI Practice")
 
 
+# APIの立ち上げ確認エンドポイント
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# ChatUIのHTMLを返すエンドポイント
 @app.get("/", response_class=HTMLResponse)
 def chat_ui() -> HTMLResponse:
     return HTMLResponse(render_chat_ui_html())
 
 
+# RAGの精度評価ダッシュボードのHTMLを返すエンドポイント
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(db: Session = Depends(get_db)) -> HTMLResponse:
     data = load_dashboard_data(db)
     return HTMLResponse(render_dashboard_html(data))
 
 
+# ドキュメントをDocument, Chunkテーブルに登録するエンドポイント
 @app.post("/documents", response_model=DocumentRead, status_code=201)
 def create_document(payload: DocumentCreate, db: Session = Depends(get_db)) -> Document:
     return create_document_with_chunks(
         db=db,
         title=payload.title,
         content=payload.content,
-    )
+    ) # Documentへの登録と、チャンク分割とChunkへの登録(tools.py)
 
 
+# pdfやtxt, mdファイルなどのドキュメントをアップロードしてDocument, Chunkテーブルに保存するエンドポイント
 @app.post("/documents/upload", response_model=DocumentRead, status_code=201)
 async def upload_document(file: UploadFile, db: Session = Depends(get_db)) -> Document:
     filename = file.filename or "uploaded-document.txt"
     raw_content = await file.read()
-    title, content = extract_upload_text(filename, raw_content)
+    title, content = extract_upload_text(filename, raw_content) # アップロードファイルの読み込み(ingestion.py)
 
     return create_document_with_chunks(
         db=db,
         title=title,
         content=content,
-    )
+    ) # Documentへの登録と、チャンク分割とChunkへの登録(tools.py)
 
 
+# ドキュメント一覧を取得するエンドポイント
 @app.get("/documents", response_model=list[DocumentRead])
 def list_documents(db: Session = Depends(get_db)) -> list[Document]:
     return list(db.scalars(select(Document).order_by(Document.created_at.desc())))
 
 
+# 特定ドキュメントの詳細を取得するエンドポイント
 @app.get("/documents/{document_id}", response_model=DocumentRead)
 def get_document(document_id: int, db: Session = Depends(get_db)) -> Document:
-    document = tool_get_document(db, document_id)
+    document = tool_get_document(db, document_id) # Documentの取得(tools.py)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     return document
 
 
+# 特定ドキュメントのチャンク一覧を取得するエンドポイント
 @app.get("/documents/{document_id}/chunks", response_model=list[ChunkRead])
 def list_document_chunks(document_id: int, db: Session = Depends(get_db)) -> list[ChunkRead]:
-    document = tool_get_document(db, document_id)
+    document = tool_get_document(db, document_id) # Documentの取得(tools.py)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    chunks = tool_get_document_chunks(db, document_id)
+    chunks = tool_get_document_chunks(db, document_id) # ドキュメントのChunkを取得(tools.py)
     return [
         ChunkRead(
             id=chunk.id,
@@ -125,28 +133,32 @@ def list_document_chunks(document_id: int, db: Session = Depends(get_db)) -> lis
             embedding=chunk_read_embedding(chunk),
         )
         for chunk in chunks
-    ]
+    ] # ChunkReadスキーマに変換して返す
 
 
+# 質問をChatRequestスキーマで取り込み、RAG・LLMで回答生成、ChatResponseスキーマで返すエンドポイント
 @app.post("/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
-    response = run_rag_chat(db=db, question=payload.question, top_k=payload.top_k)
+    response = run_rag_chat(db=db, question=payload.question, top_k=payload.top_k) # RAG・LLMで回答生成(tools.py)
     db.commit()
     return response
 
 
+# 質問をAgentRequestスキーマで取り込み、ツール群で回答生成、AgentResponseスキーマで返すエンドポイント
 @app.post("/agent", response_model=AgentResponse)
 def agent(payload: AgentRequest, db: Session = Depends(get_db)) -> AgentResponse:
-    response = run_agent(db=db, question=payload.question, top_k=payload.top_k)
+    response = run_agent(db=db, question=payload.question, top_k=payload.top_k) # ツール群で回答生成(agent.py)
     db.commit()
     return response
 
 
+# 質問をAgentRequestスキーマで取り込み、ツール呼び出しエージェントで回答生成、AgentResponseスキーマで返すエンドポイント
 @app.post("/agent/tool-calling", response_model=AgentResponse)
 def tool_calling_agent(payload: AgentRequest, db: Session = Depends(get_db)) -> AgentResponse:
     response = run_tool_calling_agent(db=db, question=payload.question, top_k=payload.top_k)
     db.commit()
     return response
+
 
 
 @app.post("/memories", response_model=MemoryRead, status_code=201)

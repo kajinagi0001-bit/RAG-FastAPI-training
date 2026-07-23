@@ -52,7 +52,7 @@ def classify_run(run: RagRun, tool_call_count: int) -> str:
         return "tool_calling_agent"
     if run.conversation_id is not None:
         return "conversation_rag"
-    return "chat_or_local_agent"
+    return "chat_or_unknown"
 
 
 def summarize_agent_runs(records: list[AgentRunRecord]) -> dict[str, dict[str, float]]:

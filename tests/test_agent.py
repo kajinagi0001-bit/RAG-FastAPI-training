@@ -1,8 +1,11 @@
 import app.agent as agent
 from app.agent import run_agent
-from app.embedding import embed_text_local
 from app.retrieval import SearchableChunk, SearchResult
 from app.schemas import ChatResponse, Source
+
+
+def fake_embedding(_: str) -> list[float]:
+    return [0.0, 1.0]
 
 
 def test_run_agent_records_steps_and_returns_answer(monkeypatch) -> None:
@@ -12,7 +15,7 @@ def test_run_agent_records_steps_and_returns_answer(monkeypatch) -> None:
         title="RAG",
         content="RAG retrieves relevant chunks.",
         chunk_index=2,
-        embedding=embed_text_local("RAG retrieves relevant chunks."),
+        embedding=fake_embedding("RAG retrieves relevant chunks."),
     )
 
     monkeypatch.setattr(
@@ -65,6 +68,8 @@ def test_run_agent_records_steps_and_returns_answer(monkeypatch) -> None:
         "log_rag_run",
     ]
     assert logged == [("What does RAG retrieve?", "agent")]
+    assert "total" in response.timings
+    assert "memory_search" in response.timings
 
 
 def test_run_agent_retries_search_when_retrieval_is_weak(monkeypatch) -> None:
@@ -74,7 +79,7 @@ def test_run_agent_retries_search_when_retrieval_is_weak(monkeypatch) -> None:
         title="RAG",
         content="Weak result.",
         chunk_index=0,
-        embedding=embed_text_local("Weak result."),
+        embedding=fake_embedding("Weak result."),
     )
     strong_chunk = SearchableChunk(
         chunk_id=2,
@@ -82,7 +87,7 @@ def test_run_agent_retries_search_when_retrieval_is_weak(monkeypatch) -> None:
         title="Agent",
         content="Agent loops can retry searches.",
         chunk_index=0,
-        embedding=embed_text_local("Agent loops can retry searches."),
+        embedding=fake_embedding("Agent loops can retry searches."),
     )
     calls = []
 
@@ -141,14 +146,14 @@ def test_run_agent_passes_memories_to_answer_history(monkeypatch) -> None:
         title="RAG",
         content="RAG retrieves relevant chunks.",
         chunk_index=2,
-        embedding=embed_text_local("RAG retrieves relevant chunks."),
+        embedding=fake_embedding("RAG retrieves relevant chunks."),
     )
     memory = Memory(
         id=1,
         content="The user prefers implementation-first explanations.",
         source="user",
         embedding_json="[]",
-        embedding_model="local-hash-64",
+        embedding_model="text-embedding-3-small",
     )
     captured_history = []
 

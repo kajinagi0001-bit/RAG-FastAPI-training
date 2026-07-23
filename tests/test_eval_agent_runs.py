@@ -52,7 +52,7 @@ def test_summarize_agent_runs_groups_by_run_type() -> None:
     records = [
         AgentRunRecord(
             rag_run_id=1,
-            run_type="chat_or_local_agent",
+            run_type="chat_or_unknown",
             question="Q1",
             tool_call_count=0,
             groundedness=5,
@@ -72,8 +72,8 @@ def test_summarize_agent_runs_groups_by_run_type() -> None:
 
     summary = summarize_agent_runs(records)
 
-    assert summary["chat_or_local_agent"]["run_count"] == 1.0
-    assert summary["chat_or_local_agent"]["avg_answer_quality"] == 4.0
+    assert summary["chat_or_unknown"]["run_count"] == 1.0
+    assert summary["chat_or_unknown"]["avg_answer_quality"] == 4.0
     assert summary["tool_calling_agent"]["avg_tool_calls"] == 2.0
 
 
@@ -81,7 +81,7 @@ def test_lowest_rated_runs_orders_by_quality_scores() -> None:
     records = [
         AgentRunRecord(
             rag_run_id=1,
-            run_type="chat_or_local_agent",
+            run_type="chat_or_unknown",
             question="High",
             tool_call_count=0,
             groundedness=5,

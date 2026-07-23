@@ -4,7 +4,6 @@ from datetime import datetime
 import app.main as main
 import app.retrieval_service as retrieval_service
 import app.tools as tools
-from app.embedding import embed_text_local
 from app.judge import JudgeResult, MemoryJudgeResult, ToolCallJudgeResult
 from app.main import app
 from app.models import AgentToolCall, Memory, RagRun
@@ -14,6 +13,10 @@ from app.schemas import AgentResponse, AgentStep
 client = TestClient(app)
 
 
+def fake_embedding(_: str) -> list[float]:
+    return [0.0, 1.0]
+
+
 def test_chat_ui_returns_html() -> None:
     response = client.get("/")
 
@@ -21,15 +24,16 @@ def test_chat_ui_returns_html() -> None:
     assert "text/html" in response.headers["content-type"]
     assert "RAG Chat" in response.text
     assert "Document Upload" in response.text
+    assert "Timing" in response.text
     assert "/documents/upload" in response.text
     assert "Evaluation Dashboard" in response.text
     assert "/agent/tool-calling" in response.text
 
 
 def test_create_list_and_chat(monkeypatch) -> None:
-    monkeypatch.setattr(tools, "embed_text", embed_text_local)
-    monkeypatch.setattr(retrieval_service, "embed_text", embed_text_local)
-    monkeypatch.setattr(retrieval_service, "embedding_model_name", lambda: "local-hash-64")
+    monkeypatch.setattr(tools, "embed_text", fake_embedding)
+    monkeypatch.setattr(retrieval_service, "embed_text", fake_embedding)
+    monkeypatch.setattr(retrieval_service, "embedding_model_name", lambda: "text-embedding-3-small")
     monkeypatch.setattr(tools, "search_memories", lambda db, query, top_k: [])
     monkeypatch.setattr(
         tools,
@@ -64,6 +68,9 @@ def test_create_list_and_chat(monkeypatch) -> None:
     assert sources[0]["chunk_index"] == 0
     assert sources[0]["score"] > 0
     assert chat.json()["answer"] == "Generated answer from retrieved context."
+    assert "total" in chat.json()["timings"]
+    assert "retrieval" in chat.json()["timings"]
+    assert "generation" in chat.json()["timings"]
 
     runs = client.get("/rag-runs")
     assert runs.status_code == 200
@@ -121,6 +128,8 @@ def test_create_list_and_chat(monkeypatch) -> None:
         "answer_with_context",
         "log_rag_run",
     ]
+    assert "memory_search" in agent_response.json()["timings"]
+    assert "generation" in agent_response.json()["timings"]
     agent_runs = [
         run
         for run in client.get("/rag-runs").json()
@@ -171,7 +180,7 @@ def test_memory_endpoints(monkeypatch) -> None:
         content="The user prefers implementation-first explanations.",
         source="user",
         embedding_json="[]",
-        embedding_model="local-hash-64",
+        embedding_model="text-embedding-3-small",
         created_at=datetime(2026, 7, 17, 0, 0, 0),
     )
     monkeypatch.setattr(main, "create_memory", lambda db, content, source=None: memory)
@@ -244,9 +253,9 @@ def test_memory_endpoints(monkeypatch) -> None:
 
 
 def test_upload_markdown_document(monkeypatch) -> None:
-    monkeypatch.setattr(tools, "embed_text", embed_text_local)
-    monkeypatch.setattr(retrieval_service, "embed_text", embed_text_local)
-    monkeypatch.setattr(retrieval_service, "embedding_model_name", lambda: "local-hash-64")
+    monkeypatch.setattr(tools, "embed_text", fake_embedding)
+    monkeypatch.setattr(retrieval_service, "embed_text", fake_embedding)
+    monkeypatch.setattr(retrieval_service, "embedding_model_name", lambda: "text-embedding-3-small")
 
     uploaded = client.post(
         "/documents/upload",
@@ -278,9 +287,9 @@ def test_upload_rejects_unsupported_file_type() -> None:
 
 
 def test_conversation_chat_saves_messages(monkeypatch) -> None:
-    monkeypatch.setattr(tools, "embed_text", embed_text_local)
-    monkeypatch.setattr(retrieval_service, "embed_text", embed_text_local)
-    monkeypatch.setattr(retrieval_service, "embedding_model_name", lambda: "local-hash-64")
+    monkeypatch.setattr(tools, "embed_text", fake_embedding)
+    monkeypatch.setattr(retrieval_service, "embed_text", fake_embedding)
+    monkeypatch.setattr(retrieval_service, "embedding_model_name", lambda: "text-embedding-3-small")
 
     captured_history = []
 
@@ -425,8 +434,8 @@ def test_tool_call_judge_saves_feedback(monkeypatch) -> None:
         question="How does RAG retrieve documents?",
         answer="",
         retrieved_sources_json="[]",
-        embedding_model="local-hash-64",
-        generation_model="local",
+        embedding_model="text-embedding-3-small",
+        generation_model="gpt-4o-mini",
     )
 
     class FakeDb:

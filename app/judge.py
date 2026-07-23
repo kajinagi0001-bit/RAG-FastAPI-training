@@ -69,19 +69,11 @@ def judge_answer(
     answer: str,
     retrieved_sources_json: str,
 ) -> JudgeResult:
-    if settings.generation_provider == "local":
-        return judge_answer_local(question, answer, retrieved_sources_json)
-    if settings.generation_provider == "openai":
-        return judge_answer_openai(question, answer, retrieved_sources_json)
-    raise ValueError(f"Unsupported generation provider: {settings.generation_provider}")
+    return judge_answer_openai(question, answer, retrieved_sources_json)
 
 
 def judge_memory(content: str, source: str | None) -> MemoryJudgeResult:
-    if settings.generation_provider == "local":
-        return judge_memory_local(content, source)
-    if settings.generation_provider == "openai":
-        return judge_memory_openai(content, source)
-    raise ValueError(f"Unsupported generation provider: {settings.generation_provider}")
+    return judge_memory_openai(content, source)
 
 
 def judge_tool_call(
@@ -90,11 +82,7 @@ def judge_tool_call(
     arguments_json: str,
     output_json: str,
 ) -> ToolCallJudgeResult:
-    if settings.generation_provider == "local":
-        return judge_tool_call_local(user_question, tool_name, arguments_json, output_json)
-    if settings.generation_provider == "openai":
-        return judge_tool_call_openai(user_question, tool_name, arguments_json, output_json)
-    raise ValueError(f"Unsupported generation provider: {settings.generation_provider}")
+    return judge_tool_call_openai(user_question, tool_name, arguments_json, output_json)
 
 
 def judge_answer_openai(
@@ -145,71 +133,6 @@ def judge_tool_call_openai(
         ),
     )
     return parse_tool_call_judge_json(response.output_text)
-
-
-def judge_answer_local(
-    question: str,
-    answer: str,
-    retrieved_sources_json: str,
-) -> JudgeResult:
-    sources = _load_sources(retrieved_sources_json)
-    if not sources:
-        return JudgeResult(
-            groundedness=1,
-            answer_quality=2 if answer else 1,
-            source_usefulness=1,
-            notes="Local judge: no retrieved sources were available.",
-        )
-
-    source_text = " ".join(str(source.get("content", "")) for source in sources)
-    groundedness = 4 if _has_word_overlap(answer, source_text) else 2
-    answer_quality = 4 if len(answer.strip()) >= 40 else 3
-    source_usefulness = 4 if _has_word_overlap(question, source_text) else 2
-    return JudgeResult(
-        groundedness=groundedness,
-        answer_quality=answer_quality,
-        source_usefulness=source_usefulness,
-        notes="Local judge: heuristic score based on source presence and word overlap.",
-    )
-
-
-def judge_memory_local(content: str, source: str | None) -> MemoryJudgeResult:
-    stripped = content.strip()
-    word_count = len(_words(stripped))
-    importance = 4 if _looks_like_durable_memory(stripped) else 2
-    accuracy = 4 if word_count >= 3 else 2
-    future_usefulness = 4 if source or importance >= 4 else 3
-    return MemoryJudgeResult(
-        importance=importance,
-        accuracy=accuracy,
-        future_usefulness=future_usefulness,
-        notes="Local judge: heuristic score based on specificity and durable-memory wording.",
-    )
-
-
-def judge_tool_call_local(
-    user_question: str,
-    tool_name: str,
-    arguments_json: str,
-    output_json: str,
-) -> ToolCallJudgeResult:
-    arguments = _load_json_object(arguments_json)
-    output = _load_json_object(output_json)
-    tool_choice_quality = 4 if tool_name in _known_tool_names() else 2
-    argument_quality = 4 if arguments else 2
-    output_usefulness = 2 if "error" in output else 4 if output else 2
-
-    if tool_name in {"search_knowledge_base", "search_memories"}:
-        query = str(arguments.get("question") or arguments.get("query") or "")
-        if query and _has_word_overlap(user_question, query):
-            argument_quality = 5
-
-    return ToolCallJudgeResult(
-        tool_choice_quality=tool_choice_quality,
-        argument_quality=argument_quality,
-        output_usefulness=output_usefulness,
-        notes="Local judge: heuristic score based on known tool name, arguments, and output error status.",
-    )
 
 
 def parse_judge_json(raw_text: str) -> JudgeResult:
@@ -294,56 +217,3 @@ def _score(value: object) -> int:
     return score
 
 
-def _load_sources(retrieved_sources_json: str) -> list[dict]:
-    try:
-        sources = json.loads(retrieved_sources_json)
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(sources, list):
-        return []
-    return [source for source in sources if isinstance(source, dict)]
-
-
-def _load_json_object(raw_text: str) -> dict:
-    try:
-        value = json.loads(raw_text)
-    except json.JSONDecodeError:
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def _has_word_overlap(left: str, right: str) -> bool:
-    left_words = _words(left)
-    right_words = _words(right)
-    return bool(left_words & right_words)
-
-
-def _words(text: str) -> set[str]:
-    return {word for word in text.lower().split() if len(word) >= 4}
-
-
-def _looks_like_durable_memory(content: str) -> bool:
-    durable_terms = {
-        "prefers",
-        "preference",
-        "likes",
-        "uses",
-        "wants",
-        "needs",
-        "works",
-        "learning",
-        "always",
-        "usually",
-    }
-    return bool(_words(content) & durable_terms)
-
-
-def _known_tool_names() -> set[str]:
-    return {
-        "search_knowledge_base",
-        "get_document",
-        "get_document_chunks",
-        "answer_with_context",
-        "create_memory",
-        "search_memories",
-    }

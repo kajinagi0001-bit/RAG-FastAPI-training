@@ -241,6 +241,10 @@ def render_chat_ui_html() -> str:
         <div id="answer" class="answer muted">No answer yet.</div>
       </div>
       <div class="panel">
+        <h2>Timing</h2>
+        <div id="timings" class="stack muted">No timing data yet.</div>
+      </div>
+      <div class="panel">
         <h2>Sources</h2>
         <div id="sources" class="stack muted">No sources yet.</div>
       </div>
@@ -261,6 +265,7 @@ def render_chat_ui_html() -> str:
     const topKInput = document.getElementById("top-k");
     const sendButton = document.getElementById("send-button");
     const answerEl = document.getElementById("answer");
+    const timingsEl = document.getElementById("timings");
     const sourcesEl = document.getElementById("sources");
     const stepsEl = document.getElementById("steps");
     const metaEl = document.getElementById("meta");
@@ -322,6 +327,8 @@ def render_chat_ui_html() -> str:
       answerEl.textContent = "Loading...";
       sourcesEl.className = "stack muted";
       sourcesEl.textContent = "Loading...";
+      timingsEl.className = "stack muted";
+      timingsEl.textContent = "Loading...";
       stepsEl.className = "stack muted";
       stepsEl.textContent = "Loading...";
       metaEl.innerHTML = "";
@@ -341,6 +348,8 @@ def render_chat_ui_html() -> str:
       } catch (error) {
         answerEl.className = "answer error";
         answerEl.textContent = String(error.message || error);
+        timingsEl.className = "stack muted";
+        timingsEl.textContent = "No timing data.";
         sourcesEl.className = "stack muted";
         sourcesEl.textContent = "No sources.";
         stepsEl.className = "stack muted";
@@ -353,8 +362,26 @@ def render_chat_ui_html() -> str:
     function renderResponse(payload) {
       answerEl.className = "answer";
       answerEl.textContent = payload.answer || "";
+      renderTimings(payload.timings || {});
       renderSources(payload.sources || []);
       renderSteps(payload.steps || []);
+    }
+
+    function renderTimings(timings) {
+      const entries = Object.entries(timings);
+      if (!entries.length) {
+        timingsEl.className = "stack muted";
+        timingsEl.textContent = "No timing data.";
+        return;
+      }
+      timingsEl.className = "stack";
+      timingsEl.innerHTML = `
+        <article class="item">
+          ${entries.map(([name, seconds]) => `
+            <p><strong>${escapeHtml(name)}</strong>: ${formatSeconds(seconds)}</p>
+          `).join("")}
+        </article>
+      `;
     }
 
     function renderSources(sources) {
@@ -420,6 +447,14 @@ def render_chat_ui_html() -> str:
         return value;
       }
       return value.slice(0, maxLength - 3) + "...";
+    }
+
+    function formatSeconds(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) {
+        return "-";
+      }
+      return `${number.toFixed(3)}s`;
     }
   </script>
 </body>

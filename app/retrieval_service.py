@@ -7,6 +7,7 @@ from app.retrieval import SearchableChunk, SearchResult, search_documents
 from app.settings import settings
 
 
+# questionの埋め込みを作成し、DBから関連性の高いChunkを検索し、tok_k件のSearchResultを返す
 def retrieve_chunks(db: Session, question: str, top_k: int) -> list[SearchResult]:
     query_embedding = embed_text(question)
     chunks = [
@@ -22,7 +23,7 @@ def retrieve_chunks(db: Session, question: str, top_k: int) -> list[SearchResult
     ]
     return search_documents(query_embedding, chunks, top_k)
 
-
+# Chunkのembeddingを取得する。DBに保存されているembeddingが存在し、かつ期待される次元数と一致する場合はそれを返す。そうでない場合は新たに埋め込みを作成して返す。
 def chunk_embedding(chunk: Chunk, expected_dimensions: int | None = None) -> list[float]:
     if chunk.embedding_json and chunk.embedding_model == embedding_model_name():
         embedding = deserialize_embedding(chunk.embedding_json)
@@ -32,6 +33,4 @@ def chunk_embedding(chunk: Chunk, expected_dimensions: int | None = None) -> lis
 
 
 def embedding_model_name() -> str:
-    if settings.embedding_provider == "local":
-        return f"local-hash-{settings.local_embedding_dimensions}"
     return settings.openai_embedding_model

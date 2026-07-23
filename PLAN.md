@@ -530,7 +530,7 @@ Compared run types:
 ```text
 tool_calling_agent
 conversation_rag
-chat_or_local_agent
+chat_or_unknown
 ```
 
 Summary metrics:
@@ -640,6 +640,8 @@ Agent run comparison reports: done
 Agent run type tracking: done
 Evaluation dashboard: done
 Chat UI: done
+lawqa_jp 20-sample evaluation: done
+Response timing visualization: done
 ```
 
 ## Next Concrete Task

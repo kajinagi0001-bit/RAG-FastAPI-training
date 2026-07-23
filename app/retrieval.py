@@ -25,6 +25,7 @@ def tokenize(text: str) -> set[str]:
     return {token.lower() for token in TOKEN_PATTERN.findall(text)}
 
 
+# questionの埋め込みとChunkのコサイン類似度を計算し、スコアでソートしたtop_k件のSearchResultを返す
 def search_documents(
     query_embedding: list[float],
     chunks: list[SearchableChunk],

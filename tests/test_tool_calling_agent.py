@@ -2,11 +2,14 @@ import json
 from datetime import datetime
 
 import app.tool_calling_agent as tool_calling_agent
-from app.embedding import embed_text_local
 from app.models import Chunk, Document, Memory
 from app.retrieval import SearchableChunk, SearchResult
 from app.schemas import ChatResponse, Source
 from app.tool_calling_agent import ToolCallingState, execute_tool_call
+
+
+def fake_embedding(_: str) -> list[float]:
+    return [0.0, 1.0]
 
 
 def test_execute_search_tool_call_stores_latest_results(monkeypatch) -> None:
@@ -16,7 +19,7 @@ def test_execute_search_tool_call_stores_latest_results(monkeypatch) -> None:
         title="RAG",
         content="RAG retrieves relevant chunks.",
         chunk_index=2,
-        embedding=embed_text_local("RAG retrieves relevant chunks."),
+        embedding=fake_embedding("RAG retrieves relevant chunks."),
     )
     monkeypatch.setattr(
         tool_calling_agent.tools,
@@ -47,7 +50,7 @@ def test_execute_answer_tool_call_uses_latest_results(monkeypatch) -> None:
         title="RAG",
         content="RAG retrieves relevant chunks.",
         chunk_index=2,
-        embedding=embed_text_local("RAG retrieves relevant chunks."),
+        embedding=fake_embedding("RAG retrieves relevant chunks."),
     )
     state = ToolCallingState(
         latest_results=[SearchResult(chunk=chunk, score=0.9)]
@@ -125,7 +128,7 @@ def test_execute_get_document_chunks_tool_call_updates_latest_results(monkeypatc
     monkeypatch.setattr(
         tool_calling_agent.tools,
         "chunk_read_embedding",
-        lambda chunk: embed_text_local(chunk.content),
+        lambda chunk: fake_embedding(chunk.content),
     )
     state = ToolCallingState()
 
@@ -152,7 +155,7 @@ def test_execute_create_memory_tool_call_returns_memory(monkeypatch) -> None:
         content="The user prefers concise explanations.",
         source="user",
         embedding_json="[]",
-        embedding_model="local-hash-64",
+        embedding_model="text-embedding-3-small",
         created_at=datetime(2026, 7, 17, 0, 0, 0),
     )
     monkeypatch.setattr(
@@ -186,7 +189,7 @@ def test_execute_search_memories_tool_call_returns_matches(monkeypatch) -> None:
         content="The user prefers concise explanations.",
         source="user",
         embedding_json="[]",
-        embedding_model="local-hash-64",
+        embedding_model="text-embedding-3-small",
         created_at=datetime(2026, 7, 17, 0, 0, 0),
     )
     monkeypatch.setattr(

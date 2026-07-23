@@ -22,7 +22,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-## OpenAI Embeddings
+## OpenAI Setup
 
 Create a `.env` file from the example:
 
@@ -38,7 +38,7 @@ OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 OPENAI_GENERATION_MODEL=gpt-5.6
 ```
 
-The app loads `.env` automatically at startup.
+The app loads `.env` automatically at startup. `OPENAI_API_KEY` is required because embeddings, answer generation, tool-calling, and judges all use OpenAI APIs.
 
 By default, the app uses:
 
@@ -52,36 +52,10 @@ You can override it in `.env`:
 OPENAI_EMBEDDING_MODEL=text-embedding-3-large
 ```
 
-If `OPENAI_API_KEY` is not set, the app falls back to a local hash-based embedding implementation so tests and local API exploration still work without network calls.
-
-To force the local implementation:
-
-```text
-EMBEDDING_PROVIDER=local
-```
-
-To force OpenAI:
-
-```text
-EMBEDDING_PROVIDER=openai
-```
-
 LLM answer generation uses the Responses API. It defaults to:
 
 ```text
 OPENAI_GENERATION_MODEL=gpt-5.6
-```
-
-You can force local fallback generation:
-
-```text
-GENERATION_PROVIDER=local
-```
-
-Or force OpenAI generation:
-
-```text
-GENERATION_PROVIDER=openai
 ```
 
 If your default Python is too new for some packages, use the bundled Python shown by Codex and create `.venv311` instead:
@@ -239,6 +213,21 @@ The same page can upload knowledge files:
 
 After upload, the file is saved as a document, split into chunks, embedded, and becomes searchable from chat.
 
+The chat UI also shows response timings:
+
+```text
+total
+retrieval
+memory_search
+retry_retrieval
+generation
+tool_calling_llm
+tool_execution
+log_rag_run
+```
+
+Use these values to identify whether a slow response is caused mainly by retrieval, OpenAI generation, or tool-calling rounds.
+
 `POST /chat` embeds the question, searches chunks by cosine similarity, and sends the retrieved context to an LLM to generate the final answer.
 
 `POST /conversations/{id}/chat` does the same RAG flow and also stores the user and assistant messages.
@@ -273,7 +262,7 @@ It returns the final answer, sources, and a `steps` list showing which actions w
 If retrieval is weak, the agent increases `top_k` and searches once more before answering.
 If relevant long-term memories exist, they are passed into answer generation as memory history.
 
-`POST /agent/tool-calling` passes function tool definitions to the OpenAI Responses API when `GENERATION_PROVIDER=openai`.
+`POST /agent/tool-calling` passes function tool definitions to the OpenAI Responses API.
 The currently exposed function tools are:
 
 ```text
@@ -284,8 +273,6 @@ create_memory
 search_memories
 answer_with_context
 ```
-
-When `GENERATION_PROVIDER=local`, this endpoint falls back to the local `/agent` loop so the project still works without external API calls.
 
 Long-term memory is stored separately from conversation messages:
 
@@ -333,9 +320,9 @@ Run automatic memory judging:
 curl -X POST http://127.0.0.1:8000/memories/1/judge
 ```
 
-This scores the memory with the configured generation model, then stores the result as memory feedback. With `GENERATION_PROVIDER=local`, it uses a simple local heuristic instead.
+This scores the memory with the configured generation model, then stores the result as memory feedback.
 
-The local `/agent` loop now searches memories before answering. The OpenAI tool-calling agent can also call `search_memories` and `create_memory`.
+The `/agent` loop searches memories before answering. The OpenAI tool-calling agent can also call `search_memories` and `create_memory`.
 
 OpenAI tool-calling runs are traced in `agent_tool_calls`:
 
@@ -375,7 +362,7 @@ Run automatic tool-call judging:
 curl -X POST http://127.0.0.1:8000/tool-calls/1/judge
 ```
 
-This scores the tool call with the configured generation model, then stores the result as tool call feedback. With `GENERATION_PROVIDER=local`, it uses a simple local heuristic instead.
+This scores the tool call with the configured generation model, then stores the result as tool call feedback.
 
 It also passes the most recent conversation messages to the LLM prompt. The default history limit is:
 
@@ -493,6 +480,44 @@ Each case can use:
   "top_k": 3
 }
 ```
+
+## lawqa_jp Evaluation
+
+Download the first 20 samples from Digital Agency's `lawqa_jp` dataset:
+
+```powershell
+python -m scripts.download_lawqa_jp
+```
+
+This saves:
+
+```text
+evals/lawqa_jp_20.json
+```
+
+Evaluate one RAG mode:
+
+```powershell
+python -m scripts.eval_lawqa_jp --mode normal_rag
+python -m scripts.eval_lawqa_jp --mode agent
+python -m scripts.eval_lawqa_jp --mode tool_calling_agent
+```
+
+Optional detail output:
+
+```powershell
+python -m scripts.eval_lawqa_jp --mode normal_rag --show-details
+```
+
+Metrics:
+
+```text
+answer_accuracy: predicted a/b/c/d matches the dataset output
+retrieval_hit_rate: retrieved sources include the expected lawqa_jp context document
+parsed_answer_rate: the generated answer could be parsed as a/b/c/d
+```
+
+The evaluator stores each sample's `コンテキスト` as a local document titled `lawqa_jp::<ファイル名>`, then asks the selected mode to answer the multiple-choice question.
 
 ## Answer Quality Evaluation
 

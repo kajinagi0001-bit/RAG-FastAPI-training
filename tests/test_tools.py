@@ -1,5 +1,4 @@
 import app.tools as tools
-from app.embedding import embed_text_local
 from app.retrieval import SearchableChunk, SearchResult
 from app.tools import (
     answer_with_context,
@@ -8,6 +7,10 @@ from app.tools import (
     log_rag_run,
     log_tool_call,
 )
+
+
+def fake_embedding(_: str) -> list[float]:
+    return [0.0, 1.0]
 
 
 class FakeDb:
@@ -46,7 +49,7 @@ def test_answer_with_context_converts_search_results_to_sources(monkeypatch) -> 
         title="RAG",
         content="RAG retrieves relevant chunks.",
         chunk_index=2,
-        embedding=embed_text_local("RAG retrieves relevant chunks."),
+        embedding=fake_embedding("RAG retrieves relevant chunks."),
     )
 
     response = answer_with_context(

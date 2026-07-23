@@ -3,10 +3,10 @@ from app.settings import settings
 
 
 SYSTEM_INSTRUCTIONS = """
-You are a RAG assistant.
-Answer only from the provided context.
-If the context does not contain enough information, say that the database context is insufficient.
-Keep the answer concise and include source references like [document_id:chunk_index].
+あなたはRAGのアシスタントです。
+提供されたコンテキストからのみ回答してください。
+コンテキストに十分な情報がない場合は、データベースのコンテキストが不十分であることを伝えてください。
+回答は簡潔にし、[document_id:chunk_index]とソース参照を含めてください。
 """.strip()
 
 
@@ -15,11 +15,7 @@ def generate_answer(
     results: list[SearchResult],
     history: list[tuple[str, str]] | None = None,
 ) -> str:
-    if settings.generation_provider == "local":
-        return generate_answer_local(question, results, history=history)
-    if settings.generation_provider == "openai":
-        return generate_answer_openai(question, results, history=history)
-    raise ValueError(f"Unsupported generation provider: {settings.generation_provider}")
+    return generate_answer_openai(question, results, history=history)
 
 
 def generate_answer_openai(
@@ -36,24 +32,6 @@ def generate_answer_openai(
         input=_build_user_prompt(question, results, history=history),
     )
     return response.output_text
-
-
-def generate_answer_local(
-    question: str,
-    results: list[SearchResult],
-    history: list[tuple[str, str]] | None = None,
-) -> str:
-    source_text = "\n".join(
-        f"- [{result.chunk.document_id}:{result.chunk.chunk_index}] {result.chunk.content}"
-        for result in results
-    )
-    history_text = _format_history(history)
-    history_prefix = f"Conversation history:\n{history_text}\n\n" if history_text else ""
-    return (
-        f"{history_prefix}"
-        "Local generation fallback. The following retrieved chunks are relevant to "
-        f"the question: {question}\n\n{source_text}"
-    )
 
 
 def _build_user_prompt(

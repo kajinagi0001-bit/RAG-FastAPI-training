@@ -11,8 +11,9 @@ from app.retrieval import SearchResult
 from app.retrieval_service import chunk_embedding, embedding_model_name, retrieve_chunks
 from app.schemas import ChatResponse, Source
 from app.settings import settings
+from app.timing import TimingRecorder
 
-
+# titleとcontentから、DocumentとChunkを作成し、DBに保存
 def create_document_with_chunks(db: Session, title: str, content: str) -> Document:
     document = Document(title=title, content=content)
     db.add(document)
@@ -35,10 +36,12 @@ def create_document_with_chunks(db: Session, title: str, content: str) -> Docume
     return document
 
 
+# DBからDocumentを取得し、titleとcontentを返す
 def get_document(db: Session, document_id: int) -> Document | None:
     return db.get(Document, document_id)
 
 
+# documebt_idに紐づくChunkをDBから取得する
 def get_document_chunks(db: Session, document_id: int) -> list[Chunk]:
     return list(
         db.scalars(
@@ -49,8 +52,10 @@ def get_document_chunks(db: Session, document_id: int) -> list[Chunk]:
     )
 
 
+# DBからquestionに関連するChunkを検索し、SearchResultのリストを返す
 def search_knowledge_base(db: Session, question: str, top_k: int) -> list[SearchResult]:
     return retrieve_chunks(db=db, question=question, top_k=top_k)
+
 
 
 def answer_with_context(
@@ -88,15 +93,20 @@ def run_rag_chat(
     history: list[tuple[str, str]] | None = None,
     conversation_id: int | None = None,
 ) -> ChatResponse:
-    results = search_knowledge_base(db=db, question=question, top_k=top_k)
-    response = answer_with_context(question=question, results=results, history=history)
-    log_rag_run(
-        db=db,
-        question=question,
-        response=response,
-        conversation_id=conversation_id,
-        run_type="conversation_rag" if conversation_id is not None else "chat",
-    )
+    timings = TimingRecorder()
+    with timings.measure("retrieval"):
+        results = search_knowledge_base(db=db, question=question, top_k=top_k)
+    with timings.measure("generation"):
+        response = answer_with_context(question=question, results=results, history=history)
+    with timings.measure("log_rag_run"):
+        log_rag_run(
+            db=db,
+            question=question,
+            response=response,
+            conversation_id=conversation_id,
+            run_type="conversation_rag" if conversation_id is not None else "chat",
+        )
+    response.timings = timings.finish()
     return response
 
 
@@ -117,9 +127,7 @@ def log_rag_run(
         ),
         run_type=run_type,
         embedding_model=embedding_model_name(),
-        generation_model=settings.openai_generation_model
-        if settings.generation_provider == "openai"
-        else "local",
+        generation_model=settings.openai_generation_model,
     )
     db.add(run)
     db.flush()

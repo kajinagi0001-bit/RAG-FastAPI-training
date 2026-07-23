@@ -5,11 +5,11 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 import app.tools as tools
-from app.agent import run_agent
 from app.models import Chunk
 from app.retrieval import SearchableChunk, SearchResult
 from app.schemas import AgentResponse, AgentStep, ChatResponse
 from app.settings import settings
+from app.timing import TimingRecorder
 
 
 TOOL_CALLING_INSTRUCTIONS = """
@@ -163,18 +163,10 @@ def run_tool_calling_agent(
     conversation_id: int | None = None,
     max_rounds: int = 4,
 ) -> AgentResponse:
-    if settings.generation_provider != "openai":
-        return run_agent(
-            db=db,
-            question=question,
-            top_k=top_k,
-            history=history,
-            conversation_id=conversation_id,
-        )
-
     from openai import OpenAI
 
     client = OpenAI()
+    timings = TimingRecorder()
     state = ToolCallingState()
     tool_call_traces: list[ToolCallTrace] = []
     steps = [
@@ -189,29 +181,33 @@ def run_tool_calling_agent(
     ]
 
     response = None
+    llm_rounds = 0
     for _ in range(max_rounds):
-        response = client.responses.create(
-            model=settings.openai_generation_model,
-            instructions=TOOL_CALLING_INSTRUCTIONS,
-            tools=TOOL_DEFINITIONS,
-            input=input_items,
-            parallel_tool_calls=False,
-        )
+        with timings.measure("tool_calling_llm"):
+            response = client.responses.create(
+                model=settings.openai_generation_model,
+                instructions=TOOL_CALLING_INSTRUCTIONS,
+                tools=TOOL_DEFINITIONS,
+                input=input_items,
+                parallel_tool_calls=False,
+            )
+        llm_rounds += 1
         function_calls = [item for item in response.output if item.type == "function_call"]
         if not function_calls:
             break
 
         input_items.extend(_response_output_as_input(response.output))
         for function_call in function_calls:
-            output = execute_tool_call(
-                db=db,
-                state=state,
-                name=function_call.name,
-                raw_arguments=function_call.arguments,
-                default_question=question,
-                default_top_k=top_k,
-                history=history,
-            )
+            with timings.measure("tool_execution"):
+                output = execute_tool_call(
+                    db=db,
+                    state=state,
+                    name=function_call.name,
+                    raw_arguments=function_call.arguments,
+                    default_question=question,
+                    default_top_k=top_k,
+                    history=history,
+                )
             steps.append(
                 AgentStep(
                     step=len(steps) + 1,
@@ -237,11 +233,12 @@ def run_tool_calling_agent(
 
     final_answer = response.output_text if response is not None else ""
     if state.latest_response is None:
-        state.latest_response = tools.answer_with_context(
-            question=question,
-            results=state.latest_results,
-            history=history,
-        )
+        with timings.measure("fallback_generation"):
+            state.latest_response = tools.answer_with_context(
+                question=question,
+                results=state.latest_results,
+                history=history,
+            )
     if not final_answer:
         final_answer = state.latest_response.answer
 
@@ -249,22 +246,23 @@ def run_tool_calling_agent(
         answer=final_answer,
         sources=state.latest_response.sources,
     )
-    rag_run = tools.log_rag_run(
-        db=db,
-        question=question,
-        response=final_response,
-        conversation_id=conversation_id,
-        run_type="tool_calling_agent",
-    )
-    for trace in tool_call_traces:
-        tools.log_tool_call(
+    with timings.measure("log_rag_run"):
+        rag_run = tools.log_rag_run(
             db=db,
-            rag_run_id=rag_run.id,
-            step=trace.step,
-            tool_name=trace.tool_name,
-            arguments_json=trace.arguments_json,
-            output_json=trace.output_json,
+            question=question,
+            response=final_response,
+            conversation_id=conversation_id,
+            run_type="tool_calling_agent",
         )
+        for trace in tool_call_traces:
+            tools.log_tool_call(
+                db=db,
+                rag_run_id=rag_run.id,
+                step=trace.step,
+                tool_name=trace.tool_name,
+                arguments_json=trace.arguments_json,
+                output_json=trace.output_json,
+            )
     steps.append(
         AgentStep(
             step=len(steps) + 1,
@@ -272,10 +270,13 @@ def run_tool_calling_agent(
             observation="Saved the tool-calling agent run for later evaluation.",
         )
     )
+    timings.set("llm_rounds", float(llm_rounds))
+    timings.set("tool_calls", float(len(tool_call_traces)))
     return AgentResponse(
         answer=final_response.answer,
         sources=final_response.sources,
         steps=steps,
+        timings=timings.finish(),
     )
 
 

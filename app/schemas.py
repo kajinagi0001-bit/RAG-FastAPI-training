@@ -44,6 +44,7 @@ class Source(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: list[Source]
+    timings: dict[str, float] = Field(default_factory=dict)
 
 
 class AgentRequest(ChatRequest):

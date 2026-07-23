@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 
 import app.tools as tools
 from app.schemas import AgentResponse, AgentStep
+from app.timing import TimingRecorder
 
 
 MIN_USEFUL_SCORE = 0.25
@@ -16,6 +17,7 @@ def run_agent(
     history: list[tuple[str, str]] | None = None,
     conversation_id: int | None = None,
 ) -> AgentResponse:
+    timings = TimingRecorder()
     steps: list[AgentStep] = [
         AgentStep(
             step=1,
@@ -24,7 +26,8 @@ def run_agent(
         )
     ]
 
-    memory_matches = tools.search_memories(db=db, query=question, top_k=MEMORY_TOP_K)
+    with timings.measure("memory_search"):
+        memory_matches = tools.search_memories(db=db, query=question, top_k=MEMORY_TOP_K)
     steps.append(
         AgentStep(
             step=2,
@@ -35,7 +38,8 @@ def run_agent(
     memory_history = _memory_history(memory_matches)
     combined_history = [*(history or []), *memory_history]
 
-    results = tools.search_knowledge_base(db=db, question=question, top_k=top_k)
+    with timings.measure("retrieval"):
+        results = tools.search_knowledge_base(db=db, question=question, top_k=top_k)
     steps.append(
         AgentStep(
             step=3,
@@ -56,7 +60,8 @@ def run_agent(
                 ),
             )
         )
-        results = tools.search_knowledge_base(db=db, question=question, top_k=retry_top_k)
+        with timings.measure("retry_retrieval"):
+            results = tools.search_knowledge_base(db=db, question=question, top_k=retry_top_k)
         steps.append(
             AgentStep(
                 step=5,
@@ -73,11 +78,12 @@ def run_agent(
             )
         )
 
-    chat_response = tools.answer_with_context(
-        question=question,
-        results=results,
-        history=combined_history,
-    )
+    with timings.measure("generation"):
+        chat_response = tools.answer_with_context(
+            question=question,
+            results=results,
+            history=combined_history,
+        )
     steps.append(
         AgentStep(
             step=len(steps) + 1,
@@ -86,13 +92,14 @@ def run_agent(
         )
     )
 
-    tools.log_rag_run(
-        db=db,
-        question=question,
-        response=chat_response,
-        conversation_id=conversation_id,
-        run_type="agent",
-    )
+    with timings.measure("log_rag_run"):
+        tools.log_rag_run(
+            db=db,
+            question=question,
+            response=chat_response,
+            conversation_id=conversation_id,
+            run_type="agent",
+        )
     steps.append(
         AgentStep(
             step=len(steps) + 1,
@@ -105,6 +112,7 @@ def run_agent(
         answer=chat_response.answer,
         sources=chat_response.sources,
         steps=steps,
+        timings=timings.finish(),
     )
 
 
